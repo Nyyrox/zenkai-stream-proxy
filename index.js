@@ -126,13 +126,26 @@ export default {
             if (!trimmed) { out.push(line); continue; }
             if (trimmed.startsWith("#")) {
               const rewrittenTag = trimmed.replace(/URI=["']([^"']+)["']/g, (m, uri) => {
-                const absUrl = new URL(uri, target).toString();
-                return `URI="${url.origin}/proxy?url=${encodeURIComponent(absUrl)}&referer=${encodeURIComponent(referer)}"`;
+                let absUrl;
+                try {
+                  absUrl = new URL(uri, target);
+                  if (!absUrl.search && targetUrl.search) absUrl.search = targetUrl.search;
+                } catch {
+                  return m;
+                }
+                return `URI="${url.origin}/proxy?url=${encodeURIComponent(absUrl.toString())}&referer=${encodeURIComponent(referer)}"`;
               });
               out.push(rewrittenTag);
             } else {
-              const absUrl = new URL(trimmed, target).toString();
-              out.push(`${url.origin}/proxy?url=${encodeURIComponent(absUrl)}&referer=${encodeURIComponent(referer)}`);
+              let absUrl;
+              try {
+                absUrl = new URL(trimmed, target);
+                if (!absUrl.search && targetUrl.search) absUrl.search = targetUrl.search;
+              } catch {
+                out.push(trimmed);
+                continue;
+              }
+              out.push(`${url.origin}/proxy?url=${encodeURIComponent(absUrl.toString())}&referer=${encodeURIComponent(referer)}`);
             }
           }
           responseHeaders.set("Content-Type", "application/vnd.apple.mpegurl");
