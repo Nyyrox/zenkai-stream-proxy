@@ -82,8 +82,7 @@ export default {
 
     if (path === "/proxy") {
       const target = url.searchParams.get("url");
-      const referer = url.searchParams.get("referer") || url.searchParams.get("ref") || "https://flixcloud.cc/";
-      const origin = url.searchParams.get("origin") || referer.replace(/\/$/, "");
+      const requestedReferer = url.searchParams.get("referer") || url.searchParams.get("ref");
 
       if (!target) {
         return json({ error: "Missing ?url= param" }, 400);
@@ -93,6 +92,33 @@ export default {
       try { targetUrl = new URL(target); } catch {
         return json({ error: "Invalid target URL" }, 400);
       }
+
+      const host = targetUrl.hostname.toLowerCase();
+      let referer = requestedReferer;
+
+      if (!referer || referer === "https://flixcloud.cc/" || referer === "https://flixcloud.cc") {
+        if (host.includes("krussdomi") || host.includes("advancedairesearchlab")) {
+          referer = "https://krussdomi.com/";
+        } else if (host.includes("animeapps") || host.includes("nukitashi") || host.includes("playeng")) {
+          referer = "https://playeng.animeapps.top/";
+        } else if (host.includes("megap") || host.includes("shiora") || host.includes("akirax") || host.includes("imgnex")) {
+          referer = "https://megaplay.top/";
+        } else if (host.includes("animegg")) {
+          referer = "https://www.animegg.org/";
+        } else if (host.includes("vibevibe") || host.includes("vivibebe")) {
+          referer = "https://anineko.to/";
+        } else if (host.includes("anizone")) {
+          referer = "https://anizone.to/";
+        } else if (host.includes("aniwave")) {
+          referer = "https://aniwave.to/";
+        } else if (host.includes("flixcloud") || host.includes("atomic4cdn") || host.includes("rundowncdn")) {
+          referer = "https://flixcloud.cc/";
+        } else {
+          referer = requestedReferer || `${targetUrl.origin}/`;
+        }
+      }
+
+      const origin = url.searchParams.get("origin") || referer.replace(/\/$/, "");
 
       const forwardHeaders = new Headers();
       forwardHeaders.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
@@ -110,15 +136,25 @@ export default {
       try {
         const upstream = await fetch(target, { method: request.method, headers: forwardHeaders });
         const contentType = upstream.headers.get("Content-Type") || "";
-        const isM3U8 = contentType.includes("mpegurl") || contentType.includes("x-mpegurl") || targetUrl.pathname.endsWith(".m3u8") || targetUrl.pathname.endsWith(".m3u");
-
+        
         const responseHeaders = new Headers(upstream.headers);
         responseHeaders.set("Access-Control-Allow-Origin", "*");
         responseHeaders.set("Access-Control-Allow-Headers", "*");
+        responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
         responseHeaders.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
 
-        if (isM3U8) {
+        if (!upstream.ok) {
+          return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+        }
+
+        const isLikelyM3U8 = contentType.includes("mpegurl") || contentType.includes("x-mpegurl") || targetUrl.pathname.endsWith(".m3u8") || targetUrl.pathname.endsWith(".m3u");
+
+        if (isLikelyM3U8) {
           const text = await upstream.text();
+          if (text.trim().startsWith("<") || text.includes("<html") || text.includes("<head")) {
+            return new Response(text, { status: upstream.status, headers: responseHeaders });
+          }
+
           const lines = text.split(/\r?\n/);
           const out = [];
           for (let line of lines) {
