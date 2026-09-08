@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import { availableParallelism } from "node:os";
-import { Worker, isMainThread, parentPort, workerData } from "node:worker_threads";
 
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -128,37 +126,8 @@ function solveProof(salt, target) {
   }
 }
 
-if (!isMainThread && workerData?.babastreamProofs) {
-  try {
-    parentPort.postMessage(workerData.babastreamProofs.map(({ index, salt, target }) => ({ index, nonce: solveProof(salt, target) })));
-  } catch (error) {
-    throw error;
-  } finally {
-    parentPort.close();
-  }
-}
-
-async function solveProofs(proofs) {
-  if (proofs.length < 2 || !isMainThread) return proofs.map(({ index, salt, target }) => ({ index, nonce: solveProof(salt, target) }));
-  const workerCount = Math.min(availableParallelism(), proofs.length);
-  const batches = Array.from({ length: workerCount }, () => []);
-  proofs.forEach((proof, index) => batches[index % workerCount].push(proof));
-  const result = await Promise.all(batches.map((batch) => new Promise((resolve, reject) => {
-    const worker = new Worker(new URL(import.meta.url), {
-      workerData: { babastreamProofs: batch },
-      execArgv: process.execArgv.filter((argument) => !argument.startsWith("--input-type")),
-    });
-    let completed = false;
-    worker.once("message", (value) => {
-      completed = true;
-      resolve(value);
-    });
-    worker.once("error", reject);
-    worker.once("exit", (code) => {
-      if (!completed && code !== 0) reject(new Error(`BabaStream proof worker exited with code ${code}`));
-    });
-  })));
-  return result.flat().sort((left, right) => left.index - right.index);
+function solveProofs(proofs) {
+  return proofs.map(({ index, salt, target }) => ({ index, nonce: solveProof(salt, target) }));
 }
 
 async function solveChallenge(payload) {

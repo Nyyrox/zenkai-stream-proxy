@@ -9,58 +9,30 @@ import {
   stripTags,
 } from "../core/new-provider-utils.js";
 import { get, set, isFresh, SHOW_IDENTITY_TTL } from "../core/smartcache.js";
-import { execFile } from "child_process";
-import { promisify } from "util";
-
-const execFileAsync = promisify(execFile);
 
 const BASE = "https://anidb.app";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
-const COOKIE_JAR = "/tmp/anidbapp_cookies.txt";
 
-const NAV_HEADERS = [
-  "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-  "Accept-Language: en-US,en;q=0.9",
-  "sec-ch-ua: \"Google Chrome\";v=\"137\", \"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
-  "sec-ch-ua-mobile: ?0",
-  "sec-ch-ua-platform: \"Windows\"",
-  "sec-fetch-dest: document",
-  "sec-fetch-mode: navigate",
-  "sec-fetch-site: none",
-  "sec-fetch-user: ?1",
-  "upgrade-insecure-requests: 1",
-];
+const NAV_HEADERS = {
+  "User-Agent": UA,
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+};
 
-const XHR_HEADERS = [
-  "Accept: application/json, text/html, */*;q=0.8",
-  "Accept-Language: en-US,en;q=0.9",
-  "sec-ch-ua: \"Google Chrome\";v=\"137\", \"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
-  "sec-ch-ua-mobile: ?0",
-  "sec-ch-ua-platform: \"Windows\"",
-  "sec-fetch-dest: empty",
-  "sec-fetch-mode: cors",
-  "sec-fetch-site: same-origin",
-  "X-Requested-With: XMLHttpRequest",
-];
+const XHR_HEADERS = {
+  "User-Agent": UA,
+  "Accept": "application/json, text/html, */*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+  "X-Requested-With": "XMLHttpRequest",
+};
 
-async function curlFetch(url, headers, extraArgs = []) {
-  const args = [
-    "-s",
-    "--compressed",
-    "-A", UA,
-    "-c", COOKIE_JAR,
-    "-b", COOKIE_JAR,
-    "-w", "\n__STATUS:%{http_code}",
-    ...headers.flatMap(h => ["-H", h]),
-    ...extraArgs,
-    url,
-  ];
-  const { stdout } = await execFileAsync("curl", args, { maxBuffer: 8 * 1024 * 1024 });
-  const sep = stdout.lastIndexOf("\n__STATUS:");
-  const status = sep >= 0 ? Number(stdout.slice(sep + 10)) : 0;
-  const body = sep >= 0 ? stdout.slice(0, sep) : stdout;
-  if (status < 200 || status >= 300) {
-    const err = new Error(`HTTP ${status} fetching ${url}`);
+async function curlFetch(url, headersObj = {}) {
+  const res = await fetch(url, {
+    headers: { ...headersObj, "User-Agent": UA },
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} fetching ${url}`);
     err.rawBody = body;
     throw err;
   }
@@ -68,12 +40,12 @@ async function curlFetch(url, headers, extraArgs = []) {
 }
 
 async function fetchAnidbHtml(url, referer) {
-  const headers = referer ? [...NAV_HEADERS, `Referer: ${referer}`] : NAV_HEADERS;
+  const headers = referer ? { ...NAV_HEADERS, Referer: referer } : NAV_HEADERS;
   return curlFetch(url, headers);
 }
 
 async function fetchXhr(url, referer) {
-  const headers = referer ? [...XHR_HEADERS, `Referer: ${referer}`] : XHR_HEADERS;
+  const headers = referer ? { ...XHR_HEADERS, Referer: referer } : XHR_HEADERS;
   return curlFetch(url, headers);
 }
 
