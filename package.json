@@ -1,12 +1,16 @@
 {
-  "name": "all-api",
+  "name": "zenkai-stream-proxy",
   "version": "2.2.1",
   "type": "module",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "build": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "start": "wrangler dev"
   },
-  "dependencies": {
-    "dotenv": "^16.4.5"
-  }
+  "devDependencies": {
+    "wrangler": "^3.107.0"
+  },
+  "dependencies": {}
 }
+
