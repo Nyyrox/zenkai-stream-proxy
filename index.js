@@ -15,6 +15,8 @@ import senshiHandler               from "./providers/senshi.js";
 import kaaHandler                  from "./providers/kickassanime.js";
 import animedunyaHandler           from "./providers/animedunya.js";
 import animesaltHandler            from "./providers/animesalt.js";
+import avatarsData                 from "./avatars.json";
+import bannersData                 from "./banners.json";
 import { getEpisodesResponse, getFilteredEpisodesResponse } from "./core/episode-cache.js";
 import { resolveProviders }         from "./core/episode-strategy.js";
 import { getAsync, setAsync, isFresh, mapTTL, WATCH_TTL, _CACHE_ENABLED } from "./core/smartcache.js";
@@ -399,6 +401,14 @@ export default {
       return animesaltHandler.fetch(request);
     }
 
+    if (path === "/avatars.json" || path === "/avatars") {
+      return json(avatarsData);
+    }
+
+    if (path === "/banners.json" || path === "/banners") {
+      return json(bannersData);
+    }
+
     m = path.match(/^\/stream\/2dhive\/(\d+)\/(sub|dub)\/(\d+)\/?$/);
     if (m) return dhiveHandler.fetch(request);
 
@@ -426,6 +436,8 @@ export default {
         "animesalt",
       ],
       routes: [
+        "/avatars.json",
+        "/banners.json",
         "/map/:anilistId",
         "/episodes/:anilistId",
         "/episodes/:provider[/:provider...]/:anilistId?map=true|false",
