@@ -14,6 +14,7 @@ import anibdHandler                from "./providers/anibd.js";
 import senshiHandler               from "./providers/senshi.js";
 import kaaHandler                  from "./providers/kickassanime.js";
 import animedunyaHandler           from "./providers/animedunya.js";
+import animesaltHandler            from "./providers/animesalt.js";
 import { getEpisodesResponse, getFilteredEpisodesResponse } from "./core/episode-cache.js";
 import { resolveProviders }         from "./core/episode-strategy.js";
 import { getAsync, setAsync, isFresh, mapTTL, WATCH_TTL, _CACHE_ENABLED } from "./core/smartcache.js";
@@ -111,6 +112,8 @@ export default {
           referer = "https://anizone.to/";
         } else if (host.includes("aniwave")) {
           referer = "https://aniwave.to/";
+        } else if (host.includes("animesalt") || host.includes("as-cdn") || host.includes("acdn.top")) {
+          referer = "https://animesalt.cx/";
         } else if (host.includes("flixcloud") || host.includes("atomic4cdn") || host.includes("rundowncdn")) {
           referer = "https://flixcloud.cc/";
         } else {
@@ -380,6 +383,22 @@ export default {
       );
     }
 
+    m = path.match(/^\/watch\/animesalt\/(\d+)\/(sub|dub|multi)\/animesalt-(\d+)\/?$/);
+    if (m) {
+      const [, id, audio, ep] = m;
+      return cachedWatch(
+        `watch:animesalt:${id}:${audio}:${ep}`,
+        () => animesaltHandler.fetch(request)
+      );
+    }
+
+    m = path.match(/^\/stream\/animesalt\/([^/?#]+)\/?$/);
+    if (m) return animesaltHandler.fetch(request);
+
+    if (path === "/extract/animesalt") {
+      return animesaltHandler.fetch(request);
+    }
+
     m = path.match(/^\/stream\/2dhive\/(\d+)\/(sub|dub)\/(\d+)\/?$/);
     if (m) return dhiveHandler.fetch(request);
 
@@ -404,6 +423,7 @@ export default {
         "senshi",
         "kaa",
         "animedunya",
+        "animesalt",
       ],
       routes: [
         "/map/:anilistId",
@@ -426,6 +446,9 @@ export default {
         "/watch/senshi/:id/sub|dub/senshi-:ep",
         "/watch/kaa/:id/sub|dub/kaa-:ep",
         "/watch/animedunya/:id/sub|dub/animedunya-:ep",
+        "/watch/animesalt/:id/sub|dub|multi/animesalt-:ep",
+        "/stream/animesalt/:slug",
+        "/extract/animesalt?url=:url",
       ],
     });
   },

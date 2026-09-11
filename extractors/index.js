@@ -5,6 +5,7 @@ import { canExtractMegaPlay, extractMegaPlay, extractMegaPlayDetails } from "./m
 import { canExtractNova, extractNova } from "./nova.js";
 import { canExtractVidplay, extractVidplay } from "./vidplay.js";
 import { canExtractVidmoly, extractVidmoly } from "./vidmoly.js";
+import { canExtractAnimeSalt, extractAnimeSalt, extractAnimeSaltDetails } from "./animesalt.js";
 
 export { canExtractByse, extractByse } from "./byse.js";
 export { canExtractBabaStream, extractBabaStream, extractBabaStreamDetails } from "./babastream.js";
@@ -13,9 +14,11 @@ export { canExtractMegaPlay, extractMegaPlay, extractMegaPlayDetails } from "./m
 export { canExtractNova, extractNova } from "./nova.js";
 export { canExtractVidplay, extractVidplay } from "./vidplay.js";
 export { canExtractVidmoly, extractVidmoly } from "./vidmoly.js";
+export { canExtractAnimeSalt, extractAnimeSalt, extractAnimeSaltDetails } from "./animesalt.js";
 export { extractFlixcloud } from "./flixcloud.js";
 
 const videoExtractors = [
+  { name: "animesalt", matches: canExtractAnimeSalt, extract: extractAnimeSalt },
   { name: "babastream", matches: canExtractBabaStream, extract: extractBabaStream },
   { name: "byse", matches: canExtractByse, extract: extractByse },
   { name: "datasv", matches: canExtractDataSv, extract: extractDataSv },
