@@ -16,61 +16,6 @@ export function canExtractAnimeSalt(url = "") {
 }
 
 /**
- * Dean Edwards P.A.C.K.E.R. Unpacker
- */
-function unpackJs(packed = "") {
-  try {
-    const match = packed.match(
-      /eval\(function\s*\(\s*p\s*,\s*a\s*,\s*c\s*,\s*k\s*,\s*e\s*,\s*[rd]\s*\)[\s\S]*?\}\s*\(\s*'(.*?)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'(.*?)'\.split\('\|'\)/
-    );
-    if (!match) return packed;
-
-    let [, p, a, c, k] = match;
-    const base = Number(a);
-    const count = Number(c);
-    const words = k.split("|");
-
-    function decodeBaseN(val, radix) {
-      const chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      if (val < radix) return chars[val];
-      return decodeBaseN(Math.floor(val / radix), radix) + chars[val % radix];
-    }
-
-    const dict = {};
-    for (let i = 0; i < count; i++) {
-      dict[decodeBaseN(i, base)] = words[i] || decodeBaseN(i, base);
-    }
-
-    return p.replace(/\b\w+\b/g, (w) => dict[w] ?? w);
-  } catch {
-    return packed;
-  }
-}
-
-/**
- * Searches HTML and JS snippets for direct .m3u8 streams
- */
-function findM3u8InText(text = "") {
-  if (!text) return null;
-  const unpacked = unpackJs(text);
-  const patterns = [
-    /file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-    /src\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-    /["'](https?:\/\/[^"']+\/master\.m3u8[^"']*)["']/i,
-    /["'](https?:\/\/[^"']+\/hls\/[^"']+\.m3u8[^"']*)["']/i,
-    /["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i,
-  ];
-
-  for (const pattern of patterns) {
-    const m = unpacked.match(pattern);
-    if (m && m[1]) {
-      return decodeEntities(m[1].replace(/\\\//g, "/"));
-    }
-  }
-  return null;
-}
-
-/**
  * Extracts HLS stream from an AnimeSalt episode or player embed URL
  */
 export async function extractAnimeSalt(url, referer = "https://animesalt.cx/") {
@@ -80,78 +25,72 @@ export async function extractAnimeSalt(url, referer = "https://animesalt.cx/") {
 
 export async function extractAnimeSaltDetails(url, referer = "https://animesalt.cx/") {
   try {
-    const rawHtml = await fetchHtml(url, {
-      Referer: referer,
-      "User-Agent": DEFAULT_UA,
-    });
+    let targetPageUrl = url;
+    let videoOrigin = "";
+    let videoHash = "";
+    let iframeUrl = "";
 
-    // 1. Direct search in page HTML
-    let directHls = findM3u8InText(rawHtml);
-    if (directHls) {
-      return {
-        streamUrl: directHls,
-        isHls: true,
-        headers: { Referer: referer, "User-Agent": DEFAULT_UA },
-        subtitles: [],
-      };
-    }
+    // 1. If input is already an as-cdn player iframe URL (e.g. https://as-cdn26.top/video/hash)
+    const directPlayerMatch = url.match(/https?:\/\/(?:as-cdn\d*|acdn)\.top\/video\/([a-zA-Z0-9_-]+)/i);
+    if (directPlayerMatch) {
+      iframeUrl = url;
+      videoHash = directPlayerMatch[1];
+      videoOrigin = new URL(url).origin;
+    } else {
+      // Input is episode webpage URL: fetch HTML and locate video iframe
+      const rawHtml = await fetchHtml(url, {
+        Referer: referer,
+        "User-Agent": DEFAULT_UA,
+      });
 
-    // 2. Base64 encoded buttons: loadMi({ value: '...' })
-    const loadMiRegex = /loadMi\(\{\s*value:\s*'([^']+)'/gi;
-    let match;
-    while ((match = loadMiRegex.exec(rawHtml)) !== null) {
-      try {
-        const b64 = match[1];
-        const decoded = atob(b64);
-        const iframeSrc = decoded.match(/<iframe[^>]*(?:data-src|src)=["']([^"']+)["']/i)?.[1];
-        if (iframeSrc) {
-          let targetSrc = iframeSrc.trim();
-          if (targetSrc.startsWith("//")) targetSrc = `https:${targetSrc}`;
-          const iframeHtml = await fetchHtml(targetSrc, { Referer: url, "User-Agent": DEFAULT_UA }).catch(() => "");
-          const hls = findM3u8InText(iframeHtml);
-          if (hls) {
-            return {
-              streamUrl: hls,
-              isHls: true,
-              headers: { Referer: `${new URL(targetSrc).origin}/`, "User-Agent": DEFAULT_UA },
-              subtitles: [],
-            };
-          }
-        }
-      } catch {}
-    }
+      const m =
+        rawHtml.match(/src=["'](https?:\/\/(?:as-cdn\d*|acdn)\.top\/video\/([a-zA-Z0-9_-]+))["']/i) ||
+        rawHtml.match(/data-src=["'](https?:\/\/(?:as-cdn\d*|acdn)\.top\/video\/([a-zA-Z0-9_-]+))["']/i) ||
+        rawHtml.match(/(https?:\/\/(?:as-cdn\d*|acdn)\.top\/video\/([a-zA-Z0-9_-]+))/i);
 
-    // 3. Regular iframes inside container
-    const iframeMatches = [...rawHtml.matchAll(/<iframe[^>]*(?:data-src|src)=["']([^"']+)["']/gi)];
-    for (const ifm of iframeMatches) {
-      let src = ifm[1].trim();
-      if (src.startsWith("//")) src = `https:${src}`;
-      if (src.startsWith("/")) src = `https://animesalt.cx${src}`;
-      if (!src.includes("about:blank") && !src.includes("google")) {
-        const iframeHtml = await fetchHtml(src, { Referer: url, "User-Agent": DEFAULT_UA }).catch(() => "");
-        const hls = findM3u8InText(iframeHtml);
-        if (hls) {
-          return {
-            streamUrl: hls,
-            isHls: true,
-            headers: { Referer: `${new URL(src).origin}/`, "User-Agent": DEFAULT_UA },
-            subtitles: [],
-          };
-        }
+      if (m) {
+        iframeUrl = m[1];
+        videoHash = m[2];
+        videoOrigin = new URL(iframeUrl).origin;
       }
     }
 
-    // 4. as-cdn / acdn video hash
-    const cdnHashMatch = rawHtml.match(/as-cdn\d*\.top\/video\/([a-zA-Z0-9]+)/i);
-    if (cdnHashMatch) {
-      const hash = cdnHashMatch[1];
-      const directCandidate = `https://as-cdn1.top/hls/${hash}/master.m3u8`;
-      return {
-        streamUrl: directCandidate,
-        isHls: true,
-        headers: { Referer: "https://animesalt.cx/", "User-Agent": DEFAULT_UA },
-        subtitles: [],
-      };
+    // 2. If we found the as-cdn player hash, make the getVideo API request to obtain the signed master.m3u8
+    if (videoHash && videoOrigin) {
+      const postUrl = `${videoOrigin}/player/index.php?data=${videoHash}&do=getVideo`;
+      const postBody = new URLSearchParams({
+        hash: videoHash,
+        r: targetPageUrl,
+      }).toString();
+
+      const resp = await fetch(postUrl, {
+        method: "POST",
+        headers: {
+          "User-Agent": DEFAULT_UA,
+          "Referer": iframeUrl || `${videoOrigin}/video/${videoHash}`,
+          "X-Requested-With": "XMLHttpRequest",
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        },
+        body: postBody,
+      });
+
+      if (resp.ok) {
+        const data = await resp.json().catch(() => null);
+        const videoSource = data?.videoSource || data?.securedLink;
+        if (videoSource) {
+          return {
+            streamUrl: videoSource,
+            isHls: true,
+            headers: {
+              "Referer": `${videoOrigin}/`,
+              "User-Agent": DEFAULT_UA,
+              "Origin": videoOrigin,
+            },
+            subtitles: [],
+            videoImage: data.videoImage || null,
+          };
+        }
+      }
     }
 
     return null;
