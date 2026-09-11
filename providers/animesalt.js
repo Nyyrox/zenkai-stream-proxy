@@ -100,7 +100,7 @@ async function scrapeSeries(slug) {
   return episodes.filter((e) => (seen.has(e.number) ? false : (seen.add(e.number), true)));
 }
 
-export async function scrapeEpisodeWatch(slug, audio = "multi") {
+export async function scrapeEpisodeWatch(slug, audio = "multi", baseUrl = "https://zenkai-stream-proxy.ammhfoo.workers.dev") {
   const candidateUrls = [
     `${BASE}/episode/${slug}/`,
     `${BASE}/movies/${slug}/`,
@@ -112,15 +112,21 @@ export async function scrapeEpisodeWatch(slug, audio = "multi") {
     try {
       const details = await extractAnimeSaltDetails(url, `${BASE}/`);
       if (details?.streamUrl) {
+        const rawUrl = details.streamUrl;
+        const referer = details.headers?.Referer || "https://animesalt.cx/";
+        const proxiedStreamUrl = `${baseUrl}/proxy?url=${encodeURIComponent(rawUrl)}&referer=${encodeURIComponent(referer)}`;
+
         return [
           {
-            url: details.streamUrl,
+            url: proxiedStreamUrl,
+            rawUrl: rawUrl,
             type: "hls",
             audio: audio,
-            server: "AnimeSalt (acdn)",
+            server: "acdn (Multi-Audio)",
             priority: 10,
             headers: details.headers,
             subtitles: details.subtitles,
+            videoImage: details.videoImage,
             isActive: true,
           },
         ];
@@ -173,6 +179,7 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const path = url.pathname;
+    const workerOrigin = url.origin;
 
     // Pattern: /watch/animesalt/:id/(sub|dub|multi)/animesalt-:ep
     const m = path.match(/^\/watch\/animesalt\/(\d+)\/(sub|dub|multi)\/animesalt-(\d+)\/?$/);
@@ -184,7 +191,7 @@ export default {
       const normTitle = normalizeAnimeSaltTitle(title);
       const slug = isMovie ? normTitle : `${normTitle}-1x${ep}`;
 
-      const streams = await scrapeEpisodeWatch(slug, audio);
+      const streams = await scrapeEpisodeWatch(slug, audio, workerOrigin);
       if (streams.length) {
         return json({
           status: 200,
@@ -214,7 +221,7 @@ export default {
     const m2 = path.match(/^\/stream\/animesalt\/([^/?#]+)\/?$/);
     if (m2) {
       const slug = m2[1];
-      const streams = await scrapeEpisodeWatch(slug);
+      const streams = await scrapeEpisodeWatch(slug, "multi", workerOrigin);
       return json({ status: 200, streams });
     }
 
@@ -223,7 +230,17 @@ export default {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) return json({ error: "Missing url parameter" }, 400);
       const details = await extractAnimeSaltDetails(targetUrl);
-      return json(details ?? { error: "Failed to extract AnimeSalt HLS" }, details ? 200 : 404);
+      if (!details) return json({ error: "Failed to extract AnimeSalt HLS" }, 404);
+      const referer = details.headers?.Referer || "https://animesalt.cx/";
+      const proxiedStreamUrl = `${workerOrigin}/proxy?url=${encodeURIComponent(details.streamUrl)}&referer=${encodeURIComponent(referer)}`;
+      return json({
+        streamUrl: proxiedStreamUrl,
+        rawStreamUrl: details.streamUrl,
+        isHls: true,
+        headers: details.headers,
+        subtitles: details.subtitles,
+        videoImage: details.videoImage,
+      });
     }
 
     return json({ error: "Not found" }, 404);
