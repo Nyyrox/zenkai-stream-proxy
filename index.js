@@ -14,6 +14,7 @@ import anibdHandler                from "./providers/anibd.js";
 import senshiHandler               from "./providers/senshi.js";
 import kaaHandler                  from "./providers/kickassanime.js";
 import animedunyaHandler           from "./providers/animedunya.js";
+import animeonsenHandler           from "./providers/animeonsen.js";
 import animesaltHandler            from "./providers/animesalt.js";
 import avatarsData                 from "./avatars.json";
 import bannersData                 from "./banners.json";
@@ -450,6 +451,15 @@ export default {
       );
     }
 
+    m = path.match(/^\/watch\/animeonsen\/(\d+)\/(sub|dub)\/animeonsen-(\d+)\/?$/);
+    if (m) {
+      const [, id, audio, ep] = m;
+      return cachedWatch(
+        `watch:animeonsen:${id}:${audio}:${ep}`,
+        () => animeonsenHandler.fetch(request)
+      );
+    }
+
     m = path.match(/^\/watch\/animesalt\/(\d+)\/(sub|dub|multi)\/animesalt-(\d+)\/?$/);
     if (m) {
       const [, id, audio, ep] = m;
@@ -498,6 +508,7 @@ export default {
         "senshi",
         "kaa",
         "animedunya",
+        "animeonsen",
         "animesalt",
       ],
       routes: [
@@ -523,6 +534,7 @@ export default {
         "/watch/senshi/:id/sub|dub/senshi-:ep",
         "/watch/kaa/:id/sub|dub/kaa-:ep",
         "/watch/animedunya/:id/sub|dub/animedunya-:ep",
+        "/watch/animeonsen/:id/sub|dub/animeonsen-:ep",
         "/watch/animesalt/:id/sub|dub|multi/animesalt-:ep",
         "/stream/animesalt/:slug",
         "/extract/animesalt?url=:url",

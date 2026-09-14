@@ -16,6 +16,7 @@ import { getEpisodes as anibdEpisodes   } from "../providers/anibd.js";
 import { getEpisodes as senshiEpisodes } from "../providers/senshi.js";
 import { getEpisodes as kaaEpisodes    } from "../providers/kickassanime.js";
 import { getEpisodes as animedunyaEpisodes } from "../providers/animedunya.js";
+import { getEpisodes as animeonsenEpisodes } from "../providers/animeonsen.js";
 import { getEpisodes as animesaltEpisodes } from "../providers/animesalt.js";
 const JIKAN = "https://api.jikan.moe/v4";
 const UA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -194,6 +195,7 @@ const PROVIDER_ALIASES = {
   senshi: "senshi",
   kaa:    "kaa",
   animedunya: "animedunya",
+  animeonsen: "animeonsen",
   animesalt: "animesalt",
 };
 
@@ -224,6 +226,7 @@ function providerFns(anilistId, status, ctx) {
     senshi: () => withCache(`epv:senshi:${anilistId}`,  status, () => senshiEpisodes(anilistId, ctx)),
     kaa:    () => withCache(`epv:kaa:${anilistId}`,     status, () => kaaEpisodes(anilistId, ctx)),
     animedunya: () => withCache(`epv:animedunya:${anilistId}`, status, () => animedunyaEpisodes(anilistId, ctx)),
+    animeonsen: () => withCache(`epv:animeonsen:${anilistId}`, status, () => animeonsenEpisodes(anilistId, ctx)),
     animesalt: () => withCache(`epv:animesalt:${anilistId}`, status, () => animesaltEpisodes(anilistId, ctx)),
   };
 }
@@ -259,7 +262,7 @@ export async function buildEpisodesWithCache(anilistId, media, anizip) {
 
   const ctx = { media, anizip, jikanEps, maxPages: undefined };
 
-  const [mkissa, reanime, anikoto, animegg, anineko, anidbapp, dhive, animenosub, anizone, aniwaves, anibd, senshi, kaa, animedunya, animesalt] = await Promise.all([
+  const [mkissa, reanime, anikoto, animegg, anineko, anidbapp, dhive, animenosub, anizone, aniwaves, anibd, senshi, kaa, animedunya, animeonsen, animesalt] = await Promise.all([
     safe("mkissa",     () => withCache(`epv:mkissa:${anilistId}`,     status, () => mkissaEpisodes(anilistId, ctx))),
     safe("reanime",    () => withCache(`epv:reanime:${anilistId}`,    status, () => reanimeEpisodes(anilistId, ctx))),
     safe("anikoto",    () => withCache(`epv:anikoto:${anilistId}`,    status, () => anikotoEpisodes(anilistId, ctx))),
@@ -274,6 +277,7 @@ export async function buildEpisodesWithCache(anilistId, media, anizip) {
     safe("senshi",     () => withCache(`epv:senshi:${anilistId}`,     status, () => senshiEpisodes(anilistId, ctx))),
     safe("kaa",        () => withCache(`epv:kaa:${anilistId}`,        status, () => kaaEpisodes(anilistId, ctx))),
     safe("animedunya", () => withCache(`epv:animedunya:${anilistId}`, status, () => animedunyaEpisodes(anilistId, ctx))),
+    safe("animeonsen", () => withCache(`epv:animeonsen:${anilistId}`, status, () => animeonsenEpisodes(anilistId, ctx))),
     safe("animesalt",  () => withCache(`epv:animesalt:${anilistId}`,  status, () => animesaltEpisodes(anilistId, ctx))),
   ]);
 
@@ -292,6 +296,7 @@ export async function buildEpisodesWithCache(anilistId, media, anizip) {
     senshi:      senshi.ok      ? senshi.data      : { error: senshi.error,      stack: senshi.stack },
     kaa:         kaa.ok         ? kaa.data         : { error: kaa.error,         stack: kaa.stack },
     animedunya:  animedunya.ok  ? animedunya.data  : { error: animedunya.error,  stack: animedunya.stack },
+    animeonsen:  animeonsen.ok  ? animeonsen.data  : { error: animeonsen.error,  stack: animeonsen.stack },
     animesalt:   animesalt.ok   ? animesalt.data   : { error: animesalt.error,   stack: animesalt.stack },
   };
 }
