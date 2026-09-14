@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// Static MegaPlay AES key & IV from newclient.min.js (UTF-8, right-padded with NULs to 32 bytes)
+const MEGAPLAY_STATIC_KEY = Buffer.concat([Buffer.from("i?LMTAx0Q6,:}50U", "utf8"), Buffer.alloc(16)]);
+const MEGAPLAY_STATIC_IV = Buffer.from("W0;27ToaUpl_P%'c", "utf8");
+
 function decodeScriptString(value) {
   return value.replace(/\\u([\dA-Fa-f]{4})|\\x([\dA-Fa-f]{2})|\\([\\'"bnfrtv0])/g, (_, unicode, hex, escaped) => {
     if (unicode) return String.fromCharCode(Number.parseInt(unicode, 16));
@@ -79,8 +83,22 @@ function getMegaPlayRoutes(script) {
   return { legacy, modern };
 }
 
-function decryptMegaPlaySource(value, script) {
-  if (!value) return null;
+export function decryptMegaPlayPayload(encValue) {
+  if (!encValue || typeof encValue !== "string") return null;
+  try {
+    const encrypted = Buffer.from(encValue, "base64url");
+    if (!encrypted.length || encrypted.length % 16 !== 0) return null;
+    const decipher = crypto.createDecipheriv("aes-256-cbc", MEGAPLAY_STATIC_KEY, MEGAPLAY_STATIC_IV);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    const data = JSON.parse(decrypted.toString("utf8"));
+    const source = data?.file ?? data?.url;
+    if (typeof source === "string" && source) return source;
+  } catch {}
+  return null;
+}
+
+function decryptMegaPlaySourceDynamic(value, script) {
+  if (!value || !script) return null;
   const encrypted = Buffer.from(value, "base64url");
   if (!encrypted.length || encrypted.length % 16) return null;
   const values = getScriptStrings(script).filter((item) => Buffer.byteLength(item) > 0 && Buffer.byteLength(item) <= 32);
@@ -99,13 +117,6 @@ function decryptMegaPlaySource(value, script) {
     }
   }
   return null;
-}
-
-function buildSourceUrl(origin, path, fileId) {
-  const endpoint = new URL(path, origin);
-  endpoint.searchParams.append("id", fileId);
-  endpoint.searchParams.append("id", fileId);
-  return endpoint;
 }
 
 async function fetchText(fetchImpl, url, headers) {
@@ -134,38 +145,93 @@ export async function extractMegaPlayDetails(embedUrl, { fetchImpl = fetch, user
   const pageHtml = await fetchText(fetchImpl, pageUrl, pageHeaders);
   const fileId = pageHtml.match(/data-id=["']([^"']+)["']/i)?.[1];
   if (!fileId) throw new Error(`MegaPlay file id not found: ${embedUrl}`);
-  const scriptUrls = [...pageHtml.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)]
-    .map((match) => new URL(match[1], pageUrl).href);
-  const scripts = await Promise.all(scriptUrls.map(async (url) => {
-    try { return await fetchText(fetchImpl, url, { "User-Agent": userAgent, "Referer": pageUrl.href }); } catch { return null; }
-  }));
-  const script = scripts.find((value) => /getSources/i.test(value) && /AES-CBC/i.test(value));
-  if (!script) throw new Error(`MegaPlay client script not found: ${embedUrl}`);
-  const { legacy, modern } = getMegaPlayRoutes(script);
-  if (!legacy && !modern) throw new Error(`MegaPlay source routes not found: ${embedUrl}`);
+
   const sourceHeaders = {
     "User-Agent": userAgent,
     "Accept": "application/json,*/*",
     "Referer": pageUrl.href,
     "X-Requested-With": "XMLHttpRequest",
   };
-  const [modernData, legacyData] = await Promise.all([
-    modern ? fetchJson(fetchImpl, buildSourceUrl(pageUrl.origin, modern, fileId), sourceHeaders).catch(() => null) : null,
-    legacy ? fetchJson(fetchImpl, buildSourceUrl(pageUrl.origin, legacy, fileId), sourceHeaders).catch(() => null) : null,
-  ]);
-  const legacyUrl = legacyData?.sources?.file ?? decryptMegaPlaySource(legacyData?.enc, script);
+
+  // s=tcdn is REQUIRED on MegaPlay for valid 200 .m3u8 playback
+  let metaData = null;
+  let decryptedUrl = null;
+
+  try {
+    const tcdnUrl = new URL("/stream/getSources", pageUrl.origin);
+    tcdnUrl.searchParams.set("id", fileId);
+    tcdnUrl.searchParams.set("s", "tcdn");
+    const tcdnData = await fetchJson(fetchImpl, tcdnUrl.href, sourceHeaders);
+    if (tcdnData?.enc) {
+      decryptedUrl = decryptMegaPlayPayload(tcdnData.enc);
+      if (decryptedUrl) {
+        metaData = tcdnData;
+      }
+    } else if (tcdnData?.sources?.file) {
+      decryptedUrl = tcdnData.sources.file;
+      metaData = tcdnData;
+    }
+  } catch {}
+
+  // Fallback to default getSources without s=tcdn if tcdn failed
+  if (!decryptedUrl) {
+    try {
+      const defUrl = new URL("/stream/getSources", pageUrl.origin);
+      defUrl.searchParams.set("id", fileId);
+      const defData = await fetchJson(fetchImpl, defUrl.href, sourceHeaders);
+      if (defData?.enc) {
+        decryptedUrl = decryptMegaPlayPayload(defData.enc);
+        if (decryptedUrl) metaData = defData;
+      } else if (defData?.sources?.file) {
+        decryptedUrl = defData.sources.file;
+        metaData = defData;
+      }
+    } catch {}
+  }
+
+  // Fallback to script scraping if static key didn't work
+  if (!decryptedUrl) {
+    const scriptUrls = [...pageHtml.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)]
+      .map((match) => new URL(match[1], pageUrl).href);
+    const scripts = await Promise.all(scriptUrls.map(async (url) => {
+      try { return await fetchText(fetchImpl, url, { "User-Agent": userAgent, "Referer": pageUrl.href }); } catch { return null; }
+    }));
+    const script = scripts.find((value) => value && /getSources/i.test(value));
+    if (script) {
+      const { legacy, modern } = getMegaPlayRoutes(script);
+      const [modernData, legacyData] = await Promise.all([
+        modern ? fetchJson(fetchImpl, `${pageUrl.origin}/${modern.replace(/^\//, "")}?id=${fileId}&s=tcdn`, sourceHeaders).catch(() => null) : null,
+        legacy ? fetchJson(fetchImpl, `${pageUrl.origin}/${legacy.replace(/^\//, "")}?id=${fileId}&s=tcdn`, sourceHeaders).catch(() => null) : null,
+      ]);
+      const legUrl = legacyData?.sources?.file ?? decryptMegaPlaySourceDynamic(legacyData?.enc, script);
+      if (legUrl) {
+        decryptedUrl = legUrl;
+        metaData = legacyData;
+      } else if (modernData?.sources?.file) {
+        decryptedUrl = modernData.sources.file;
+        metaData = modernData;
+      }
+    }
+  }
+
+  if (!decryptedUrl) {
+    throw new Error(`MegaPlay response has no playable source for: ${embedUrl}`);
+  }
+
   const sources = [
-    modernData?.sources?.file ? { url: modernData.sources.file, variant: "modern" } : null,
-    legacyUrl ? { url: legacyUrl, variant: "legacy" } : null,
-  ].filter((source, index, all) => source && all.findIndex((candidate) => candidate?.url === source.url) === index);
-  if (!sources.length) throw new Error(`MegaPlay response has no sources: ${embedUrl}`);
-  const metadata = modernData ?? legacyData ?? {};
+    { url: decryptedUrl, variant: "tcdn" }
+  ];
+
+  const tracks = Array.isArray(metaData?.tracks) ? metaData.tracks : [];
+  const intro = metaData?.intro ?? null;
+  const outro = metaData?.outro ?? null;
+
   return {
     origin: pageUrl.origin,
     sources,
-    tracks: Array.isArray(metadata.tracks) ? metadata.tracks : [],
-    intro: metadata.intro ?? null,
-    outro: metadata.outro ?? null,
+    tracks,
+    intro,
+    outro,
   };
 }
 
@@ -173,3 +239,4 @@ export async function extractMegaPlay(embedUrl, options = {}) {
   const details = await extractMegaPlayDetails(embedUrl, options);
   return details.sources.map((source) => source.url);
 }
+

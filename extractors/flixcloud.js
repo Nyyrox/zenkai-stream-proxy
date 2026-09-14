@@ -387,8 +387,22 @@ export async function extractFlixcloud(embedHtml, { fetchImpl = fetch, apiBase =
   }
   const url = decoder.decode(plain).trim().replace(/\0+$/, "");
   if (!url.startsWith("http")) throw new Error(`Unexpected decrypted value: ${url.substring(0, 60)}`);
+
+  let pk = null;
+  try {
+    const { instance } = await WebAssembly.instantiate(wasmPayload, {});
+    if (typeof instance.exports._c === "function") {
+      const offset = instance.exports._c();
+      const pkBytes = new Uint8Array(instance.exports.memory.buffer).slice(offset, offset + 32);
+      pk = btoa(String.fromCharCode(...pkBytes));
+    }
+  } catch (wasmErr) {
+    console.warn("Flixcloud pk extraction failed:", wasmErr.message);
+  }
+
   return {
     url,
+    pk,
     subtitles: data.subtitles ?? [],
     thumbnails_vtt: data.thumbnails_vtt ?? null,
     video_title: data.video_title ?? null,

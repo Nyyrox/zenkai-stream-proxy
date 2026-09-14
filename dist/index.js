@@ -3875,25 +3875,34 @@ async function handleWatch3(anilistId, audio, epNum, origin) {
     return json3({ error: e.message, "Raw-ERROR": e.rawBody ?? null, stack: e.stack }, e.status ?? 500);
   }
   const { title: title2, slug, watchData, stream, server, servers, streams, failedServers } = resolved2;
-  const seenStreamUrls = /* @__PURE__ */ new Set();
-  const cleanStreams = streams.map(({ server: source, stream: item, index }) => ({
-    server: source.serverName,
-    audio: source.dataType,
-    index,
-    url: item.url,
-    type: "hls",
-    embed: source.dataLink,
-    subtitles: item.subtitles ?? [],
-    thumbnails_vtt: item.thumbnails_vtt ?? null,
-    video_title: item.video_title ?? null,
-    intro: item.intro_chapter ?? null,
-    outro: item.outro_chapter ?? null
-  })).filter((item) => {
+  const seenStreamUrls = new Set();
+  const cleanStreams = streams.map(({ server: source, stream: item, index }) => {
+    const proxyUrl = origin
+      ? `${origin}/proxy?url=${encodeURIComponent(item.url)}&referer=${encodeURIComponent("https://flixcloud.cc/")}`
+      : `/proxy?url=${encodeURIComponent(item.url)}&referer=${encodeURIComponent("https://flixcloud.cc/")}`;
+    return {
+      server: source.serverName,
+      audio: source.dataType,
+      index,
+      url: item.url,
+      proxy_url: proxyUrl,
+      type: "hls",
+      embed: source.dataLink,
+      subtitles: item.subtitles ?? [],
+      thumbnails_vtt: item.thumbnails_vtt ?? null,
+      video_title: item.video_title ?? null,
+      intro: item.intro_chapter ?? null,
+      outro: item.outro_chapter ?? null
+    };
+  }).filter((item) => {
     if (seenStreamUrls.has(item.url)) return false;
     seenStreamUrls.add(item.url);
     return true;
   });
   const embeds = servers.map((s) => ({ name: s.serverName, type: s.dataType, url: s.dataLink }));
+  const primaryProxyUrl = origin
+    ? `${origin}/proxy?url=${encodeURIComponent(stream.url)}&referer=${encodeURIComponent("https://flixcloud.cc/")}`
+    : `/proxy?url=${encodeURIComponent(stream.url)}&referer=${encodeURIComponent("https://flixcloud.cc/")}`;
   return json3({
     anime: title2,
     slug,
@@ -3901,6 +3910,8 @@ async function handleWatch3(anilistId, audio, epNum, origin) {
     audio,
     server,
     stream_url: stream.url,
+    proxy_url: primaryProxyUrl,
+    proxy_stream_url: primaryProxyUrl,
     streams: cleanStreams,
     subtitles: stream.subtitles,
     thumbnails_vtt: stream.thumbnails_vtt,

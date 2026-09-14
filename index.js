@@ -154,12 +154,29 @@ export default {
 
         const isLikelyM3U8 = contentType.includes("mpegurl") || contentType.includes("x-mpegurl") || targetUrl.pathname.endsWith(".m3u8") || targetUrl.pathname.endsWith(".m3u");
 
+        const pk = url.searchParams.get("pk");
+
         if (isLikelyM3U8) {
-          const text = await upstream.text();
+          let text = await upstream.text();
           if (text.trim().startsWith("<") || text.includes("<html") || text.includes("<head")) {
             return new Response(text, { status: upstream.status, headers: responseHeaders });
           }
 
+          if (!text.trim().startsWith("#EXTM3U") && pk) {
+            try {
+              const pkBytes = Uint8Array.from(atob(pk), c => c.charCodeAt(0));
+              const rawBytes = Uint8Array.from(atob(text.trim()), c => c.charCodeAt(0));
+              const outDec = new Uint8Array(rawBytes.length);
+              for (let i = 0; i < rawBytes.length; i++) {
+                outDec[i] = rawBytes[i] ^ pkBytes[i % 32];
+              }
+              text = new TextDecoder().decode(outDec);
+            } catch (decErr) {
+              console.warn("Flixcloud m3u8 decryption failed:", decErr);
+            }
+          }
+
+          const pkParam = pk ? `&pk=${encodeURIComponent(pk)}` : "";
           const lines = text.split(/\r?\n/);
           const out = [];
           for (let line of lines) {
@@ -174,7 +191,7 @@ export default {
                 } catch {
                   return m;
                 }
-                return `URI="${url.origin}/proxy?url=${encodeURIComponent(absUrl.toString())}&referer=${encodeURIComponent(referer)}"`;
+                return `URI="${url.origin}/proxy?url=${encodeURIComponent(absUrl.toString())}&referer=${encodeURIComponent(referer)}${pkParam}"`;
               });
               out.push(rewrittenTag);
             } else {
@@ -186,11 +203,59 @@ export default {
                 out.push(trimmed);
                 continue;
               }
-              out.push(`${url.origin}/proxy?url=${encodeURIComponent(absUrl.toString())}&referer=${encodeURIComponent(referer)}`);
+              out.push(`${url.origin}/proxy?url=${encodeURIComponent(absUrl.toString())}&referer=${encodeURIComponent(referer)}${pkParam}`);
             }
           }
           responseHeaders.set("Content-Type", "application/vnd.apple.mpegurl");
           return new Response(out.join("\n"), { status: upstream.status, headers: responseHeaders });
+        }
+
+        const isCdnSegment = targetUrl.pathname.endsWith(".png") || targetUrl.pathname.endsWith(".image") ||
+          targetUrl.pathname.includes("/seg-") || host.includes("tiktokcdn") ||
+          host.includes("atomic4cdn") || host.includes("rundowncdn") || host.includes("flixcloud");
+        if (isCdnSegment) {
+          const chunkBuf = new Uint8Array(await upstream.arrayBuffer());
+          const isPng = chunkBuf.length >= 8 &&
+            chunkBuf[0] === 0x89 && chunkBuf[1] === 0x50 && chunkBuf[2] === 0x4E && chunkBuf[3] === 0x47 &&
+            chunkBuf[4] === 0x0D && chunkBuf[5] === 0x0A && chunkBuf[6] === 0x1A && chunkBuf[7] === 0x0A;
+
+          if (isPng) {
+            // Check if it is a TikTok CDN / MegaPlay overlaid PNG header (MPEG-TS sync byte 0x47 repeating every 188 bytes)
+            let tsOffset = -1;
+            const maxSearch = Math.min(chunkBuf.length - 188 * 3, 8192);
+            for (let off = 0; off < maxSearch; off++) {
+              if (chunkBuf[off] === 0x47 && chunkBuf[off + 188] === 0x47 && chunkBuf[off + 376] === 0x47) {
+                let valid = true;
+                for (let k = 3; k < 10 && off + 188 * k < chunkBuf.length; k++) {
+                  if (chunkBuf[off + 188 * k] !== 0x47) { valid = false; break; }
+                }
+                if (valid) { tsOffset = off; break; }
+              }
+            }
+
+            if (tsOffset >= 0) {
+              const tsOut = chunkBuf.subarray(tsOffset);
+              responseHeaders.set("Content-Type", "video/MP2T");
+              responseHeaders.set("Content-Length", String(tsOut.length));
+              return new Response(tsOut, { status: upstream.status, headers: responseHeaders });
+            }
+
+            // Otherwise check Flixcloud XOR encryption
+            if (host.includes("atomic4cdn") || host.includes("rundowncdn") || host.includes("flixcloud") || targetUrl.pathname.includes("/seg-")) {
+              const segKey = [0x9d, 0x2a, 0xf1, 0x47, 0xb3, 0x8e, 0x5c, 0x70, 0xa6, 0x19, 0xe4, 0x3b, 0xd8, 0x62, 0x0f, 0xc5];
+              const payload = chunkBuf.subarray(8);
+              const tsOut = new Uint8Array(payload.length);
+              for (let i = 0; i < payload.length; i++) {
+                tsOut[i] = payload[i] ^ segKey[i % 16];
+              }
+              responseHeaders.set("Content-Type", "video/MP2T");
+              responseHeaders.set("Content-Length", String(tsOut.length));
+              return new Response(tsOut, { status: upstream.status, headers: responseHeaders });
+            }
+          }
+
+          responseHeaders.set("Content-Type", "video/MP2T");
+          return new Response(chunkBuf, { status: upstream.status, headers: responseHeaders });
         }
 
         return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
